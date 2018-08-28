@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=8.9.0"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "prepush": "npm run lint",
     "commit": "npx git-cz",
@@ -37,15 +40,18 @@
   },
   "author": "Justin Dalrymple <justin.s.dalrymple@gmail.com>",
   "license": "MIT",
-  "readmeFilename": "README.md",
   "config": {
     "commitizen": {
       "path": "./node_modules/cz-conventional-changelog"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "browser": {
+    "fs": false,
+    "got": "xhr",
+  },
+  "node": {
+    "qs": false
+  },
   "devDependencies": {
     "@semantic-release/changelog": "^3.0.0",
     "@semantic-release/git": "^7.0.1",
@@ -70,12 +76,10 @@
     "typescript": "3.0.1"
   },
   "dependencies": {
+    "got": "^9.1.0",
     "humps": "^2.0.1",
     "parse-link-header": "^1.0.1",
     "qs": "^6.5.2",
-    "request": "^2.88.0",
-    "request-promise": "^4.2.2",
-    "request-promise-core": "^1.1.1",
     "url-join": "^4.0.0",
     "util.promisify": "^1.0.0",
     "xhr": "^2.5.0"

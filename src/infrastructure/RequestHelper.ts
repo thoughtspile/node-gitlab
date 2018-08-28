@@ -1,8 +1,8 @@
 import Humps from 'humps';
 import LinkParser from 'parse-link-header';
-import QS from 'qs';
 import URLJoin from 'url-join';
-import StreamableRequest from 'request';
+import Request from 'got';
+import QS from 'qs';
 
 interface RequestParametersInput {
   url?: string;
@@ -24,12 +24,8 @@ interface GetPaginatedOptions {
 type RequestParametersOutput = RequestParametersInput &
   Required<Pick<RequestParametersInput, 'url'>>;
 
-export async function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function defaultRequest(
-  { url, useXMLHttpRequest, rejectUnauthorized },
+  { url, rejectUnauthorized },
   endpoint,
   { headers, body, qs, formData, resolveWithFullResponse = false }: RequestParametersInput,
 ): RequestParametersOutput {
@@ -37,35 +33,30 @@ function defaultRequest(
     url: URLJoin(url, endpoint),
     headers,
     json: true,
+    resolveWithFullResponse,
+    rejectUnauthorized,
+    retries: {
+      statusCodes: [429]
+    },
+    formData,
+    body: body && Humps.decamelize(body)
   };
 
-  if (body) params.body = Humps.decamelizeKeys(body);
-
   if (qs) {
-    if (useXMLHttpRequest) {
+    const queryParams = Humps.decamelizeKeys(qs);
+
+    if (Request.name === 'xhr') {
       // The xhr package doesn't have a way of passing in a qs object until v3
-      params.url = URLJoin(params.url, `?${QS.stringify(Humps.decamelizeKeys(qs))}`);
+      params.url = URLJoin(params.url, `?${QS.stringify(queryParams)}`);
     } else {
-      params.qs = Humps.decamelizeKeys(qs);
+      params.qs = queryParams;
     }
   }
-
-  if (formData) params.formData = formData;
-
-  params.resolveWithFullResponse = resolveWithFullResponse;
-
-  params.rejectUnauthorized = rejectUnauthorized;
 
   return params;
 }
 
 function getStream(service, endpoint, options = {}) {
-  if (service.useXMLHttpRequest) {
-    throw new Error(
-      `Cannot use streaming functionality with XMLHttpRequest. Please instantiate without this option to use streaming`,
-    );
-  }
-
   const requestOptions = defaultRequest(service, endpoint, {
     headers: service.headers,
     qs: options,
@@ -82,7 +73,7 @@ async function getPaginated(service, endpoint, options: GetPaginatedOptions = {}
     resolveWithFullResponse: true,
   });
 
-  const response = await service.requester.get(requestOptions);
+  const response = await Request.get(requestOptions);
   const links = LinkParser(response.headers.link) || {};
   const page = response.headers['x-page'];
   const underMaxPageLimit = maxPages ? page < maxPages : true;
@@ -116,73 +107,36 @@ async function getPaginated(service, endpoint, options: GetPaginatedOptions = {}
 }
 
 class RequestHelper {
-  static async request(type, service, endpoint, options = {}, form = false, stream = false) {
+  static get(service: Object, endpoint: String, options = {}, { stream = false } = {}) {
+    if (stream) return getStream(service, endpoint, options);
+    return getPaginated(service, endpoint, options);
+  }
+
+  static post(service: Object, endpoint: String, options = {}, form = false) {
     const requestOptions = defaultRequest(service, endpoint, {
       headers: service.headers,
+      body: form ? 'formData' : 'body',
     });
 
-    try {
-      switch (type) {
-        case 'get':
-          if (stream) return getStream(service, endpoint, options);
-          return getPaginated(service, endpoint, options);
-
-        case 'post':
-          const body = form ? 'formData' : 'body';
-
-          requestOptions[body] = options;
-
-          return service.requester.post(requestOptions);
-
-        case 'put':
-          requestOptions.body = options;
-
-          return service.requester.put(requestOptions);
-
-        case 'delete':
-          requestOptions.qs = options;
-
-          return service.requester.delete(requestOptions);
-
-        default:
-          throw new Error(`Unknown request type ${type}`);
-      }
-    } catch (err) {
-      await RequestHelper.handleRequestError(err);
-      return RequestHelper.request(type, service, endpoint, options, form, stream);
-    }
+    return Request.post(requestOptions);
   }
 
-  static async handleRequestError(err) {
-    if (
-      !err.response ||
-      !err.response.headers ||
-      !err.response.headers['retry-after'] ||
-      parseInt(err.statusCode, 10) !== 429
-    ) {
-      throw err;
-    }
+  static put(service: Object, endpoint: String, options = {}) {
+    const requestOptions = defaultRequest(service, endpoint, {
+      headers: service.headers,
+      body: options
+    });
 
-    const sleepTime = parseInt(err.response.headers['retry-after'], 10);
-
-    if (!sleepTime) throw err;
-    return wait(sleepTime * 1000);
+    return Request.put(requestOptions);
   }
 
-  static get(service, endpoint, options = {}, { stream = false } = {}) {
-    return RequestHelper.request('get', service, endpoint, options, stream);
-  }
+  static delete(service: Object, endpoint: String, options = {}) {
+    const requestOptions = defaultRequest(service, endpoint, {
+      headers: service.headers,
+      qs: options
+    });
 
-  static post(service, endpoint, options = {}, form = false) {
-    return RequestHelper.request('post', service, endpoint, options, form);
-  }
-
-  static put(service, endpoint, options = {}) {
-    return RequestHelper.request('put', service, endpoint, options);
-  }
-
-  static delete(service, endpoint, options = {}) {
-    return RequestHelper.request('delete', service, endpoint, options);
+    return Request.delete(requestOptions);
   }
 }
 
